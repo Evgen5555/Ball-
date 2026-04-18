@@ -29,34 +29,46 @@
         body.playing:not(.menu-open) {
             touch-action: none;
         }
-        canvas {
+        #p5-host {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+        }
+        body.menu-open #p5-host {
+            pointer-events: none;
+        }
+        #p5-host canvas {
             display: block;
-            width: 100%;
-            height: 100%;
+            width: 100% !important;
+            height: 100% !important;
             position: relative;
-            z-index: 1;
+            z-index: 0;
             touch-action: none;
         }
-        body.menu-open canvas {
+        body.menu-open #p5-host canvas {
             pointer-events: none;
         }
         #menu {
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
+            max-height: 100dvh;
             background: #000;
             display: flex;
             flex-direction: column;
             align-items: center;
-            z-index: 1000;
+            z-index: 10000;
             padding: 30px 20px;
             box-sizing: border-box;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
             touch-action: pan-y;
             overscroll-behavior: contain;
+            pointer-events: auto;
+            isolation: isolate;
         }
         @media (min-height: 900px) {
             #menu {
@@ -95,6 +107,11 @@
             cursor: pointer;
             margin-bottom: 40px;
             transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            z-index: 2;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(0, 0, 0, 0.15);
+            min-height: 48px;
         }
         .play-btn:hover {
             transform: scale(1.05);
@@ -148,7 +165,7 @@
             bottom: max(16px, env(safe-area-inset-bottom));
             left: 50%;
             transform: translateX(-50%);
-            z-index: 500;
+            z-index: 12000;
             padding: 14px 28px;
             font-size: 1.1rem;
             font-weight: bold;
@@ -168,7 +185,7 @@
             display: none;
             position: fixed;
             inset: 0;
-            z-index: 2000;
+            z-index: 30000;
             padding: 24px;
             background: #1a1a1a;
             color: #eee;
@@ -185,11 +202,12 @@
     </style>
 </head>
 <body class="menu-open">
+<div id="p5-host" aria-hidden="true"></div>
 <div id="boot-error" role="alert">Не удалось загрузить игру. Нужен интернет и открытие по ссылке <strong>https://</strong> (не файл с диска). Обновите страницу.</div>
 <div id="menu">
     <div class="menu-title">Neon Bloom</div>
     <div class="menu-desc">Собирай одинаковые неоновые сферы. Создай Зенит и очисти пространство взрывом!</div>
-    <button class="play-btn" onclick="startGame()">🎮 Играть</button>
+    <button type="button" class="play-btn" id="play-btn">🎮 Играть</button>
     <div class="features-grid">
         <div class="feature-card">
             <div class="feature-title yellow">⚡ УЛЬТА</div>
@@ -281,8 +299,13 @@ function playNote(freq, type = 'sine', len = 0.2) {
 let ground, leftW, rightW;
 
 function setup() {
+    const host = document.getElementById('p5-host');
     createCanvas(windowWidth, windowHeight);
-    const cv = document.querySelector('canvas');
+    const canv = document.querySelector('canvas');
+    if (host && canv && canv.parentElement !== host) {
+        host.appendChild(canv);
+    }
+    const cv = host ? host.querySelector('canvas') : document.querySelector('canvas');
     if (cv) {
         cv.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
         cv.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
@@ -573,6 +596,24 @@ function updateTexts() {
         if (floatingTexts[i].l <= 0) floatingTexts.splice(i, 1);
     }
 }
+
+(function bindPlayButton() {
+    const btn = document.getElementById('play-btn');
+    if (!btn) return;
+    let last = 0;
+    function firePlay(e) {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        const t = Date.now();
+        if (t - last < 400) return;
+        last = t;
+        startGame();
+    }
+    btn.addEventListener('click', firePlay);
+    btn.addEventListener('touchend', firePlay, { passive: false });
+})();
 </script>
 </body>
 </html>
