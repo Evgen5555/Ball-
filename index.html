@@ -4,25 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Neon Bloom: High Contrast Edition</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.18.0/build/matter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.4.0/lib/p5.min.js"></script>
     <style>
+        html {
+            height: 100%;
+        }
         html, body {
             margin: 0;
             padding: 0;
             width: 100%;
-            height: 100%;
-            height: 100dvh;
+            min-height: 100%;
+            min-height: 100dvh;
             overflow: hidden;
             background: #000;
             display: flex;
             justify-content: center;
             align-items: center;
             font-family: Arial, sans-serif;
-            touch-action: none;
             -webkit-user-select: none;
             user-select: none;
             -webkit-touch-callout: none;
+        }
+        body.playing:not(.menu-open) {
+            touch-action: none;
         }
         canvas {
             display: block;
@@ -50,6 +55,8 @@
             box-sizing: border-box;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+            overscroll-behavior: contain;
         }
         @media (min-height: 900px) {
             #menu {
@@ -157,9 +164,28 @@
         body.playing #ultra-btn.ultra-ready {
             display: block;
         }
+        #boot-error {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            padding: 24px;
+            background: #1a1a1a;
+            color: #eee;
+            font-size: 1rem;
+            line-height: 1.5;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        #boot-error.visible {
+            display: flex;
+        }
     </style>
 </head>
 <body class="menu-open">
+<div id="boot-error" role="alert">Не удалось загрузить игру. Нужен интернет и открытие по ссылке <strong>https://</strong> (не файл с диска). Обновите страницу.</div>
 <div id="menu">
     <div class="menu-title">Neon Bloom</div>
     <div class="menu-desc">Собирай одинаковые неоновые сферы. Создай Зенит и очисти пространство взрывом!</div>
@@ -185,7 +211,15 @@
 </div>
 <button type="button" id="ultra-btn" onclick="event.preventDefault(); tryUltra();">⚡ УЛЬТА</button>
 <script>
+if (typeof Matter === 'undefined' || typeof p5 === 'undefined') {
+    const boot = document.getElementById('boot-error');
+    if (boot) boot.classList.add('visible');
+    throw new Error('NeonBloom: libraries not loaded');
+}
 const { Engine, World, Bodies, Body, Events } = Matter;
+
+let p5Ready = false;
+let startGameAttempts = 0;
 
 let engine, world, fruits = [], particles = [], floatingTexts = [];
 let score = 0, gameOver = false, ultraCharge = 100, dangerTimer = 0;
@@ -197,6 +231,13 @@ let highScore = localStorage.getItem('neonBloomHighScore') || 0;
 let aimX = 0;
 
 function startGame() {
+    if (!p5Ready || typeof resizeCanvas !== 'function') {
+        startGameAttempts++;
+        if (startGameAttempts > 180) return;
+        requestAnimationFrame(startGame);
+        return;
+    }
+    startGameAttempts = 0;
     document.getElementById('menu').classList.add('hidden');
     document.body.classList.remove('menu-open');
     document.body.classList.add('playing');
@@ -269,6 +310,7 @@ function setup() {
             });
         });
     }
+    p5Ready = true;
 }
 
 function initGame() {
