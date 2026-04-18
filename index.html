@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Neon Bloom: High Contrast Edition</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
@@ -12,12 +12,17 @@
             padding: 0;
             width: 100%;
             height: 100%;
+            height: 100dvh;
             overflow: hidden;
             background: #000;
             display: flex;
             justify-content: center;
             align-items: center;
             font-family: Arial, sans-serif;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
         }
         canvas {
             display: block;
@@ -25,6 +30,7 @@
             height: 100%;
             position: relative;
             z-index: 1;
+            touch-action: none;
         }
         body.menu-open canvas {
             pointer-events: none;
@@ -129,6 +135,28 @@
             font-size: 0.95rem;
             line-height: 1.4;
         }
+        #ultra-btn {
+            display: none;
+            position: fixed;
+            bottom: max(16px, env(safe-area-inset-bottom));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 500;
+            padding: 14px 28px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 24px;
+            background: linear-gradient(180deg, #00ffaa, #00aa77);
+            color: #000;
+            box-shadow: 0 4px 20px rgba(0, 255, 170, 0.4);
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body.playing #ultra-btn.ultra-ready {
+            display: block;
+        }
     </style>
 </head>
 <body class="menu-open">
@@ -139,7 +167,7 @@
     <div class="features-grid">
         <div class="feature-card">
             <div class="feature-title yellow">⚡ УЛЬТА</div>
-            <div class="feature-desc">Нажми Пробел или тряхни телефон, чтобы переместить поле.</div>
+            <div class="feature-desc">Пробел на ПК или кнопка «УЛЬТА» внизу на телефоне — толчок полю.</div>
         </div>
         <div class="feature-card">
             <div class="feature-title cyan">💎 ЗЕНИТ</div>
@@ -155,6 +183,7 @@
         </div>
     </div>
 </div>
+<button type="button" id="ultra-btn" onclick="event.preventDefault(); tryUltra();">⚡ УЛЬТА</button>
 <script>
 const { Engine, World, Bodies, Body, Events } = Matter;
 
@@ -165,14 +194,20 @@ let shakeAmount = 0;
 const deadLineY = 130;
 let menuShown = true;
 let highScore = localStorage.getItem('neonBloomHighScore') || 0;
+let aimX = 0;
 
 function startGame() {
     document.getElementById('menu').classList.add('hidden');
     document.body.classList.remove('menu-open');
+    document.body.classList.add('playing');
     menuShown = false;
     if (!engine) {
         initGame();
     }
+    initAudio();
+    resizeCanvas(windowWidth, windowHeight);
+    aimX = width / 2;
+    windowResized();
 }
 
 // Контрастная палитра: без полутонов
@@ -188,7 +223,10 @@ const COLORS = [
 
 let currentType, nextType, audioCtx;
 
-function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
 function playNote(freq, type = 'sine', len = 0.2) {
     if (!audioCtx) return;
     const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
@@ -203,7 +241,13 @@ let ground, leftW, rightW;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
-    
+    const cv = document.querySelector('canvas');
+    if (cv) {
+        cv.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
+        cv.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+    }
+    aimX = width / 2;
+
     if (!menuShown && !engine) {
         engine = Engine.create(); 
         world = engine.world;
@@ -251,6 +295,16 @@ function initGame() {
 
 let lastTouchTime = 0;
 
+function syncAimFromInput() {
+    if (typeof touches !== 'undefined' && touches.length > 0) {
+        aimX = touches[0].x;
+    } else {
+        aimX = mouseX;
+    }
+    const r = COLORS[currentType] ? COLORS[currentType].r : 15;
+    aimX = constrain(aimX, r + 10, width - r - 10);
+}
+
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
     if (!engine) return;
@@ -281,6 +335,7 @@ function windowResized() {
 function touchStarted() {
     if (menuShown || !engine) return false;
     lastTouchTime = millis();
+    syncAimFromInput();
     handleInput();
     return false;
 }
@@ -290,6 +345,7 @@ function mousePressed() {
     if (millis() - lastTouchTime < 300) {
         return false;
     }
+    syncAimFromInput();
     handleInput();
 }
 
@@ -303,6 +359,7 @@ function handleInput() {
         document.getElementById('record-display').textContent = highScore;
         document.getElementById('menu').classList.remove('hidden');
         document.body.classList.add('menu-open');
+        document.body.classList.remove('playing');
         menuShown = true;
         gameOver = false;
         score = 0;
@@ -317,7 +374,7 @@ function handleInput() {
         return;
     }
     playNote(450, 'triangle', 0.04);
-    const b = Bodies.circle(mouseX, 85, COLORS[currentType].r, {
+    const b = Bodies.circle(aimX, 85, COLORS[currentType].r, {
         label: 'f_' + currentType, restitution: 0.3, friction: 0.2
     });
     World.add(world, b);
@@ -333,7 +390,13 @@ function applyLevelSettings() {
 
 function draw() {
     if (menuShown || !engine) return;
-    
+
+    syncAimFromInput();
+    const ultraEl = document.getElementById('ultra-btn');
+    if (ultraEl) {
+        ultraEl.classList.toggle('ultra-ready', ultraCharge >= 100 && !gameOver);
+    }
+
     if (gameOver) {
         background(0, 230); fill(255); textAlign(CENTER); textSize(45);
         text("GAME OVER", width/2, height/2); textSize(24);
@@ -384,7 +447,7 @@ function drawUI() {
     text("SCORE: " + score, 25, 40);
     text("LEVEL: " + level, 25, 70);
     
-    fill(COLORS[currentType].c); ellipse(mouseX, 85, COLORS[currentType].r * 2);
+    fill(COLORS[currentType].c); ellipse(aimX, 85, COLORS[currentType].r * 2);
     textAlign(RIGHT); fill(255, 180); textSize(14);
     text("NEXT:", width - 60, 40);
     fill(COLORS[nextType].c); ellipse(width - 35, 35, COLORS[nextType].r);
@@ -424,14 +487,20 @@ function merge(a, b) {
     }
 }
 
+function tryUltra() {
+    if (menuShown || !engine || gameOver) return;
+    initAudio();
+    if (ultraCharge < 100) return;
+    playNote(55, 'sawtooth', 0.6);
+    shakeAmount = 25;
+    fruits.forEach(f => Body.applyForce(f.body, f.body.position, { x: random(-0.05, 0.05), y: -0.25 }));
+    ultraCharge = 0;
+    background(255, 100);
+}
+
 function keyPressed() {
     if (menuShown || !engine) return;
-    if (key === ' ' && ultraCharge >= 100) {
-        playNote(55, 'sawtooth', 0.6);
-        shakeAmount = 25;
-        fruits.forEach(f => Body.applyForce(f.body, f.body.position, { x: random(-0.05, 0.05), y: -0.25 }));
-        ultraCharge = 0; background(255, 100);
-    }
+    if (key === ' ') tryUltra();
 }
 
 class Particle {
