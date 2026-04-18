@@ -19,29 +19,38 @@
             align-items: center;
             font-family: Arial, sans-serif;
         }
-        canvas {
+        canvas, .p5Canvas {
             display: block;
             width: 100%;
             height: 100%;
             position: relative;
             z-index: 1;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
         /* Не давать canvas/wrapper p5 перехватывать тапы, пока открыто меню */
         body.menu-open canvas,
         body.menu-open .p5Canvas {
             pointer-events: none !important;
+            touch-action: manipulation;
+            visibility: hidden !important;
         }
         #menu {
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
+            right: 0;
+            bottom: 0;
             width: 100%;
-            height: 100%;
+            min-height: 100%;
+            min-height: 100dvh;
             background: #000;
             display: flex;
             flex-direction: column;
             align-items: center;
-            z-index: 10000;
+            z-index: 2147483646;
+            isolation: isolate;
             pointer-events: auto;
             touch-action: manipulation;
             padding: 30px 20px;
@@ -85,7 +94,9 @@
             touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
             position: relative;
-            z-index: 1;
+            z-index: 2;
+            -webkit-user-select: none;
+            user-select: none;
         }
         .play-btn:hover {
             transform: scale(1.05);
@@ -132,8 +143,8 @@
 <body class="menu-open">
 <div id="menu">
     <div class="menu-title">Neon Bloom</div>
-    <div class="menu-desc">Собирай одинаковые неоновые сферы. Создай Зенит и очисти пространство взрывом!</div>
-    <button type="button" class="play-btn" id="btn-play" onclick="startGame()">🎮 Играть</button>
+    <div class="menu-desc">Шары сами катятся сверху — перетаскивай их, чтобы не заполнили экран. Соединяй одинаковые, создай Зенит! С уровнем всё быстрее.</div>
+    <button type="button" class="play-btn" id="btn-play">🎮 Играть</button>
     <div class="features-grid">
         <div class="feature-card">
             <div class="feature-title yellow">⚡ УЛЬТРА</div>
@@ -149,12 +160,12 @@
         </div>
         <div class="feature-card">
             <div class="feature-title cyan">🚀 УРОВНИ</div>
-            <div class="feature-desc">Каждый Zenith Merge повышает уровень гравитации.</div>
+            <div class="feature-desc">После Зенита уровень растёт: чаще появляются шары и сильнее их «бег».</div>
         </div>
     </div>
 </div>
 <script>
-const { Engine, World, Bodies, Body, Events } = Matter;
+const { Engine, World, Bodies, Body, Events, Query } = Matter;
 
 function wakeBody(body) {
     body.sleeping = false;
@@ -172,13 +183,8 @@ let level = 1;
 let shakeAmount = 0;
 /** Красная линия у верхнего края (y меньше = выше по экрану). Обновляется при resize. */
 let deadLineY = 130;
-/** Спавн шара — строго ниже красной линии (иначе шар «рождается» уже в зоне геймовера). */
-const SPAWN_BELOW_DEADLINE = 56;
 function syncDeadLineY() {
     deadLineY = max(52, min(160, round(height * 0.11)));
-}
-function spawnDropY() {
-    return deadLineY + SPAWN_BELOW_DEADLINE;
 }
 let menuShown = true;
 let highScore = localStorage.getItem('neonBloomHighScore') || 0;
@@ -186,12 +192,33 @@ let highScore = localStorage.getItem('neonBloomHighScore') || 0;
 /** Область кнопки ульты (обновляется в drawUI). */
 let ultraBtn = { x: 0, y: 0, w: 140, h: 40 };
 
-function startGame() {
-    document.getElementById('menu').classList.add('hidden');
+/** Перетаскивание шара мышью / пальцем. */
+let dragBody = null;
+let lastAutoSpawnMs = 0;
+
+function startGame(e) {
+    if (e) {
+        if (e.type === 'touchend') e.preventDefault();
+        e.stopPropagation();
+    }
+    const menuEl = document.getElementById('menu');
+    if (!menuEl || menuEl.classList.contains('hidden')) return;
+    menuEl.classList.add('hidden');
     document.body.classList.remove('menu-open');
     menuShown = false;
     if (!engine) initGame();
 }
+
+(function bindPlayButton() {
+    const btn = document.getElementById('btn-play');
+    if (!btn) return;
+    btn.addEventListener('touchend', function (ev) {
+        startGame(ev);
+    }, { passive: false });
+    btn.addEventListener('click', function (ev) {
+        startGame(ev);
+    });
+})();
 
 const COLORS = [
     { c: '#FF0000', r: 15, s: 2, f: 450, lbl: "RED!" },
@@ -243,6 +270,8 @@ function setup() {
 
 function initGame() {
     dangerTimer = 0;
+    dragBody = null;
+    lastAutoSpawnMs = millis();
     engine = Engine.create();
     world = engine.world;
     applyLevelSettings();
@@ -288,7 +317,129 @@ function isOverUltraBtn(px, py) {
            py >= ultraBtn.y && py <= ultraBtn.y + ultraBtn.h;
 }
 
-/** Ультра: шары разлетаются в случайные стороны, игра продолжается (пробел / кнопка, только при 100%). */
+/** Координаты касания/мыши в системе p5 (важно для телефона: не полагаться только на mouseX/Y в touchStarted). */
+function pointerXY() {
+    if (typeof touches !== 'undefined' && touches.length > 0)
+        return [touches[0].x, touches[0].y];
+    return [mouseX, mouseY];
+}
+
+function bodyUnderPointer(px, py) {
+    if (!fruits.length) return null;
+    const hit = Query.point(fruits.map(f => f.body), { x: px, y: py });
+    return hit.length ? hit[0] : null;
+}
+
+function tryStartDrag(px, py) {
+    const b = bodyUnderPointer(px, py);
+    if (!b) return false;
+    dragBody = b;
+    wakeBody(b);
+    return true;
+}
+
+/** Границы, внутри которых должен оставаться центр шара (стенки и пол). */
+function clampBallCenter(px, py, r) {
+    const wallPad = 22;
+    const floorPad = 26;
+    return [
+        constrain(px, wallPad + r, width - wallPad - r),
+        constrain(py, r + 4, height - floorPad - r)
+    ];
+}
+
+function moveDragTo(px, py) {
+    if (!dragBody) return;
+    wakeBody(dragBody);
+    const f = fruits.find(x => x.body === dragBody);
+    const r = f ? f.r : 20;
+    const [cx, cy] = clampBallCenter(px, py, r);
+    Body.setPosition(dragBody, { x: cx, y: cy });
+    Body.setVelocity(dragBody, { x: 0, y: 0 });
+    Body.setAngularVelocity(dragBody, 0);
+}
+
+/** Не даём шарам вылетать за экран и режем слишком большую скорость. */
+function keepFruitsOnScreen() {
+    const wallPad = 22;
+    const floorPad = 26;
+    const maxSp = 26;
+    fruits.forEach(f => {
+        const b = f.body;
+        const r = f.r;
+        const minX = wallPad + r;
+        const maxX = width - wallPad - r;
+        const minY = r + 4;
+        const maxY = height - floorPad - r;
+        let x = b.position.x;
+        let y = b.position.y;
+        let vx = b.velocity.x;
+        let vy = b.velocity.y;
+        let moved = false;
+        if (x < minX) { x = minX; vx = abs(vx) * 0.38 + 0.1; moved = true; }
+        if (x > maxX) { x = maxX; vx = -abs(vx) * 0.38 - 0.1; moved = true; }
+        if (y < minY) { y = minY; vy = abs(vy) * 0.38 + 0.1; moved = true; }
+        if (y > maxY) { y = maxY; vy = -abs(vy) * 0.38 - 0.1; moved = true; }
+        if (moved) {
+            Body.setPosition(b, { x, y });
+            Body.setVelocity(b, { x: vx, y: vy });
+        }
+        const v = b.velocity;
+        const sp = Math.hypot(v.x, v.y);
+        if (sp > maxSp) {
+            const k = maxSp / sp;
+            Body.setVelocity(b, { x: v.x * k, y: v.y * k });
+        }
+    });
+}
+
+/** Интервал автоспавна (мс): с уровнем реже «передышка». */
+function getAutoSpawnMs() {
+    return max(360, 2800 - (level - 1) * 240);
+}
+
+/** Сколько шаров падает за один тик: ур.1 — 2, ур.2–3 — 3, с 4-го — 4. */
+function getBallsPerDrop() {
+    if (level >= 4) return 4;
+    if (level >= 2) return 3;
+    return 2;
+}
+
+function takeNextSpawnType() {
+    const t = currentType;
+    currentType = nextType;
+    nextType = floor(random(3));
+    return t;
+}
+
+/** Волна шаров с «верхней дорожки» — позиции разнесены по ширине. */
+function spawnAutoBall() {
+    if (!engine || menuShown || gameOver) return;
+    const n = getBallsPerDrop();
+    for (let i = 0; i < n; i++) {
+        const t = takeNextSpawnType();
+        const R = COLORS[t].r;
+        const margin = 28 + R;
+        const frac = (i + 0.5) / n;
+        let x = margin + (width - 2 * margin) * frac + random(-24, 24);
+        x = constrain(x, margin, width - margin);
+        const y = max(38, deadLineY - 72 - R);
+        const runBoost = 1.15 + (level - 1) * 0.55;
+        const dir = random() < 0.5 ? -1 : 1;
+        const b = Bodies.circle(x, y, R, {
+            label: 'f_' + t, restitution: 0.32, friction: 0.22, frictionAir: 0.01
+        });
+        Body.setVelocity(b, {
+            x: dir * runBoost * random(0.75, 1.35),
+            y: 1.35 + (level - 1) * 0.28 + random(0.25, 1.15)
+        });
+        Body.setAngularVelocity(b, random(-0.15, 0.15));
+        World.add(world, b);
+        fruits.push({ body: b, r: R, col: COLORS[t].c });
+    }
+}
+
+/** Ультра: перемешивание без вылета за экран (скорость режется в keepFruitsOnScreen). */
 function tryUltra() {
     if (menuShown || !engine || gameOver) return false;
     if (ultraCharge < 100) return false;
@@ -298,13 +449,13 @@ function tryUltra() {
     fruits.forEach(f => {
         const b = f.body;
         wakeBody(b);
-        const mag = random(26, 52);
+        const mag = random(10, 20);
         const ang = random(TWO_PI);
         Body.setVelocity(b, {
-            x: cos(ang) * mag + random(-16, 16),
-            y: sin(ang) * mag + random(-16, 16)
+            x: cos(ang) * mag + random(-7, 7),
+            y: sin(ang) * mag + random(-7, 7)
         });
-        Body.setAngularVelocity(b, random(-0.75, 0.75));
+        Body.setAngularVelocity(b, random(-0.45, 0.45));
     });
     ultraCharge = 0;
     background(255, 100);
@@ -314,23 +465,55 @@ function tryUltra() {
 function touchStarted() {
     /* return true — не вызывать preventDefault, иначе на мобильных не сработает кнопка «Играть» в DOM */
     if (menuShown || !engine) return true;
-    if (isOverUltraBtn(mouseX, mouseY)) {
+    const [px, py] = pointerXY();
+    if (gameOver) {
+        handleInput();
+        return false;
+    }
+    if (isOverUltraBtn(px, py)) {
         tryUltra();
         return false;
     }
     lastTouchTime = millis();
-    handleInput();
+    tryStartDrag(px, py);
     return false;
 }
 
 function mousePressed() {
     if (menuShown || !engine) return true;
+    if (gameOver) {
+        handleInput();
+        return false;
+    }
     if (isOverUltraBtn(mouseX, mouseY)) {
         tryUltra();
         return false;
     }
-    if (millis() - lastTouchTime < 300) return false;
-    handleInput();
+    /* После touch браузер шлёт синтетический mouse: если тащим с касания — не дублировать захват */
+    if (millis() - lastTouchTime < 450 && dragBody) return false;
+    tryStartDrag(mouseX, mouseY);
+    return false;
+}
+
+function mouseDragged() {
+    if (menuShown || !engine || gameOver || !dragBody) return;
+    moveDragTo(mouseX, mouseY);
+}
+
+function mouseReleased() {
+    dragBody = null;
+}
+
+function touchMoved() {
+    if (menuShown || !engine || gameOver || !dragBody) return false;
+    const [px, py] = pointerXY();
+    moveDragTo(px, py);
+    return false;
+}
+
+function touchEnded() {
+    dragBody = null;
+    return false;
 }
 
 function handleInput() {
@@ -349,6 +532,7 @@ function handleInput() {
         level = 1;
         ultraCharge = 100;
         dangerTimer = 0;
+        dragBody = null;
         fruits = [];
         particles = [];
         floatingTexts = [];
@@ -356,19 +540,11 @@ function handleInput() {
         engine = null;
         return;
     }
-    playNote(450, 'triangle', 0.04);
-    const b = Bodies.circle(mouseX, spawnDropY(), COLORS[currentType].r, {
-        label: 'f_' + currentType, restitution: 0.3, friction: 0.2
-    });
-    World.add(world, b);
-    fruits.push({ body: b, r: COLORS[currentType].r, col: COLORS[currentType].c });
-    currentType = nextType;
-    nextType = floor(random(3));
 }
 
 function applyLevelSettings() {
     if (!engine) return;
-    engine.gravity.y = level === 1 ? 1.4 : 1.1;
+    engine.gravity.y = 1.12 + level * 0.26;
 }
 
 function draw() {
@@ -383,6 +559,11 @@ function draw() {
     translate(random(-shakeAmount, shakeAmount), random(-shakeAmount, shakeAmount));
     shakeAmount = max(0, shakeAmount * 0.85);
     Engine.update(engine);
+    keepFruitsOnScreen();
+    if (millis() - lastAutoSpawnMs >= getAutoSpawnMs()) {
+        lastAutoSpawnMs = millis();
+        spawnAutoBall();
+    }
     const lineAlpha = dangerTimer > 30 ? 255 : 80 + min(100, dangerTimer * 2);
     strokeWeight(3);
     stroke(255, 0, 0, lineAlpha);
@@ -415,10 +596,15 @@ function drawUI() {
     fill(255); textAlign(LEFT); textSize(20); textStyle(BOLD); noStroke();
     text("SCORE: " + score, 25, 40);
     text("LEVEL: " + level, 25, 70);
-    fill(COLORS[currentType].c); ellipse(mouseX, spawnDropY(), COLORS[currentType].r * 2);
-    textAlign(RIGHT); fill(255, 180); textSize(14);
-    text("NEXT:", width - 60, 40);
-    fill(COLORS[nextType].c); ellipse(width - 35, 35, COLORS[nextType].r);
+    textSize(13); textStyle(NORMAL); fill(255, 160);
+    text("Тяни шары · сверху идут новые", 25, 96);
+    textSize(20); textStyle(BOLD);
+    fill(255, 200); textAlign(RIGHT); textSize(13);
+    text("СКОРО:", width - 88, 38);
+    fill(COLORS[currentType].c); ellipse(width - 38, 35, COLORS[currentType].r * 2);
+    textAlign(RIGHT); fill(255, 160); textSize(12);
+    text("ещё:", width - 88, 58);
+    fill(COLORS[nextType].c); ellipse(width - 38, 58, COLORS[nextType].r * 1.35);
 
     ultraBtn.w = min(160, width * 0.42);
     ultraBtn.h = 40;
@@ -443,6 +629,7 @@ function drawUI() {
 }
 
 function merge(a, b) {
+    if (dragBody === a || dragBody === b) dragBody = null;
     const type = parseInt(a.label.split('_')[1]);
     const x = (a.position.x + b.position.x) / 2, y = (a.position.y + b.position.y) / 2;
     fruits = fruits.filter(f => f.body !== a && f.body !== b);
@@ -463,10 +650,12 @@ function merge(a, b) {
         score += 2000;
         level++;
         applyLevelSettings();
+        lastAutoSpawnMs = millis();
         floatingTexts.push(new FloatingText(width/2, height/2, "LEVEL UP!"));
         shakeAmount = 40;
         fruits.forEach(f => World.remove(world, f.body));
         fruits = [];
+        dragBody = null;
         background(255);
     }
 }
