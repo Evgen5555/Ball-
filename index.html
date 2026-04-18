@@ -2,82 +2,57 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Neon Bloom: High Contrast Edition</title>
-    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.18.0/build/matter.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.4.0/lib/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
     <style>
-        html {
-            height: 100%;
-        }
         html, body {
             margin: 0;
             padding: 0;
             width: 100%;
-            min-height: 100%;
-            min-height: 100dvh;
+            height: 100%;
             overflow: hidden;
             background: #000;
             display: flex;
             justify-content: center;
             align-items: center;
             font-family: Arial, sans-serif;
-            -webkit-user-select: none;
-            user-select: none;
-            -webkit-touch-callout: none;
         }
-        body.playing:not(.menu-open) {
-            touch-action: none;
-        }
-        #p5-host {
-            position: fixed;
-            inset: 0;
-            z-index: 0;
-            overflow: hidden;
-        }
-        body.menu-open #p5-host {
-            pointer-events: none;
-        }
-        #p5-host canvas {
+        canvas {
             display: block;
-            width: 100% !important;
-            height: 100% !important;
+            width: 100%;
+            height: 100%;
             position: relative;
-            z-index: 0;
-            touch-action: none;
+            z-index: 1;
         }
-        body.menu-open #p5-host canvas {
-            pointer-events: none;
+        /* Не давать canvas/wrapper p5 перехватывать тапы, пока открыто меню */
+        body.menu-open canvas,
+        body.menu-open .p5Canvas {
+            pointer-events: none !important;
         }
         #menu {
-            position: fixed;
+            position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            max-height: 100dvh;
             background: #000;
             display: flex;
             flex-direction: column;
             align-items: center;
             z-index: 10000;
+            pointer-events: auto;
+            touch-action: manipulation;
             padding: 30px 20px;
             box-sizing: border-box;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
-            touch-action: pan-y;
-            overscroll-behavior: contain;
-            pointer-events: auto;
-            isolation: isolate;
         }
         @media (min-height: 900px) {
-            #menu {
-                justify-content: center;
-            }
+            #menu { justify-content: center; }
         }
-        #menu.hidden {
-            display: none;
-        }
+        #menu.hidden { display: none; }
         .menu-title {
             font-size: 3.5rem;
             font-weight: bold;
@@ -107,19 +82,16 @@
             cursor: pointer;
             margin-bottom: 40px;
             transition: transform 0.2s, box-shadow 0.2s;
-            position: relative;
-            z-index: 2;
             touch-action: manipulation;
-            -webkit-tap-highlight-color: rgba(0, 0, 0, 0.15);
-            min-height: 48px;
+            -webkit-tap-highlight-color: transparent;
+            position: relative;
+            z-index: 1;
         }
         .play-btn:hover {
             transform: scale(1.05);
             box-shadow: 0 0 20px #00DD88;
         }
-        .play-btn:active {
-            transform: scale(0.98);
-        }
+        .play-btn:active { transform: scale(0.98); }
         .features-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -127,11 +99,7 @@
             width: 100%;
             max-width: 900px;
         }
-        .feature-card:nth-child(4) {
-            grid-column: auto;
-            max-width: none;
-            margin: 0;
-        }
+        .feature-card:nth-child(4) { grid-column: auto; max-width: none; margin: 0; }
         @media (min-width: 1100px) {
             .feature-card:nth-child(4) {
                 grid-column: 1 / -1;
@@ -140,10 +108,10 @@
             }
         }
         .feature-card {
-            border: 2px solid #444;
+            border: 2px solid rgba(80, 80, 80, 0.45);
             border-radius: 10px;
             padding: 20px;
-            background: rgba(50, 50, 50, 0.5);
+            background: rgba(40, 40, 40, 0.35);
         }
         .feature-title {
             color: #00FFFF;
@@ -159,59 +127,17 @@
             font-size: 0.95rem;
             line-height: 1.4;
         }
-        #ultra-btn {
-            display: none;
-            position: fixed;
-            bottom: max(16px, env(safe-area-inset-bottom));
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 12000;
-            padding: 14px 28px;
-            font-size: 1.1rem;
-            font-weight: bold;
-            border: none;
-            border-radius: 24px;
-            background: linear-gradient(180deg, #00ffaa, #00aa77);
-            color: #000;
-            box-shadow: 0 4px 20px rgba(0, 255, 170, 0.4);
-            cursor: pointer;
-            touch-action: manipulation;
-            -webkit-tap-highlight-color: transparent;
-        }
-        body.playing #ultra-btn.ultra-ready {
-            display: block;
-        }
-        #boot-error {
-            display: none;
-            position: fixed;
-            inset: 0;
-            z-index: 30000;
-            padding: 24px;
-            background: #1a1a1a;
-            color: #eee;
-            font-size: 1rem;
-            line-height: 1.5;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            box-sizing: border-box;
-        }
-        #boot-error.visible {
-            display: flex;
-        }
     </style>
 </head>
 <body class="menu-open">
-<div id="p5-host" aria-hidden="true"></div>
-<div id="boot-error" role="alert">Не удалось загрузить игру. Нужен интернет и открытие по ссылке <strong>https://</strong> (не файл с диска). Обновите страницу.</div>
 <div id="menu">
     <div class="menu-title">Neon Bloom</div>
     <div class="menu-desc">Собирай одинаковые неоновые сферы. Создай Зенит и очисти пространство взрывом!</div>
-    <button type="button" class="play-btn" id="play-btn">🎮 Играть</button>
+    <button type="button" class="play-btn" id="btn-play" onclick="startGame()">🎮 Играть</button>
     <div class="features-grid">
         <div class="feature-card">
             <div class="feature-title yellow">⚡ УЛЬТРА</div>
-            <div class="feature-desc">Пробел на ПК или кнопка «УЛЬТРА» внизу на телефоне — толчок полю.</div>
+            <div class="feature-desc">Пробел на ПК или кнопка «Ультра» внизу на телефоне — толчок по всем шарам.</div>
         </div>
         <div class="feature-card">
             <div class="feature-title cyan">💎 ЗЕНИТ</div>
@@ -227,65 +153,57 @@
         </div>
     </div>
 </div>
-<button type="button" id="ultra-btn" onclick="event.preventDefault(); tryUltra();">⚡ УЛЬТА</button>
 <script>
-if (typeof Matter === 'undefined' || typeof p5 === 'undefined') {
-    const boot = document.getElementById('boot-error');
-    if (boot) boot.classList.add('visible');
-    throw new Error('NeonBloom: libraries not loaded');
-}
 const { Engine, World, Bodies, Body, Events } = Matter;
 
-let p5Ready = false;
-let startGameAttempts = 0;
+function wakeBody(body) {
+    body.sleeping = false;
+    if (Matter.Sleeping && Matter.Sleeping.set) Matter.Sleeping.set(body, false);
+}
+
+/** Подпись кнопки ульты (Unicode, буква Р — U+0420). */
+const LABEL_ULTRA = '\u0423\u041b\u042c\u0422\u0420\u0410';
 
 let engine, world, fruits = [], particles = [], floatingTexts = [];
 let score = 0, gameOver = false, ultraCharge = 100, dangerTimer = 0;
 let level = 1;
 let shakeAmount = 0;
-const deadLineY = 130;
+/** Красная линия у верхнего края (y меньше = выше по экрану). Обновляется при resize. */
+let deadLineY = 130;
+/** Спавн шара — строго ниже красной линии (иначе шар «рождается» уже в зоне геймовера). */
+const SPAWN_BELOW_DEADLINE = 56;
+function syncDeadLineY() {
+    deadLineY = max(52, min(160, round(height * 0.11)));
+}
+function spawnDropY() {
+    return deadLineY + SPAWN_BELOW_DEADLINE;
+}
 let menuShown = true;
 let highScore = localStorage.getItem('neonBloomHighScore') || 0;
-let aimX = 0;
+
+/** Область кнопки ульты (обновляется в drawUI). */
+let ultraBtn = { x: 0, y: 0, w: 140, h: 40 };
 
 function startGame() {
-    if (!p5Ready || typeof resizeCanvas !== 'function') {
-        startGameAttempts++;
-        if (startGameAttempts > 180) return;
-        requestAnimationFrame(startGame);
-        return;
-    }
-    startGameAttempts = 0;
     document.getElementById('menu').classList.add('hidden');
     document.body.classList.remove('menu-open');
-    document.body.classList.add('playing');
     menuShown = false;
-    if (!engine) {
-        initGame();
-    }
-    initAudio();
-    resizeCanvas(windowWidth, windowHeight);
-    aimX = width / 2;
-    windowResized();
+    if (!engine) initGame();
 }
 
-// Контрастная палитра: без полутонов
 const COLORS = [
-    { c: '#FF0000', r: 15, s: 2, f: 450, lbl: "RED!" },     // 0: Красный
-    { c: '#FFFF00', r: 25, s: 8, f: 350, lbl: "YELLOW!" },  // 1: Желтый
-    { c: '#00FF00', r: 40, s: 16, f: 260, lbl: "GREEN!" },  // 2: Зеленый
-    { c: '#00FFFF', r: 55, s: 32, f: 200, lbl: "CYAN!" },   // 3: Голубой
-    { c: '#0000FF', r: 75, s: 64, f: 140, lbl: "BLUE!" },   // 4: Синий
-    { c: '#FF00FF', r: 95, s: 128, f: 100, lbl: "PURPLE!" },// 5: Фиолетовый
-    { c: '#FFFFFF', r: 120, s: 256, f: 80, lbl: "ZENITH!" }// 6: Белый (Взрыв)
+    { c: '#FF0000', r: 15, s: 2, f: 450, lbl: "RED!" },
+    { c: '#FFFF00', r: 25, s: 8, f: 350, lbl: "YELLOW!" },
+    { c: '#00FF00', r: 40, s: 16, f: 260, lbl: "GREEN!" },
+    { c: '#00FFFF', r: 55, s: 32, f: 200, lbl: "CYAN!" },
+    { c: '#0000FF', r: 75, s: 64, f: 140, lbl: "BLUE!" },
+    { c: '#FF00FF', r: 95, s: 128, f: 100, lbl: "PURPLE!" },
+    { c: '#FFFFFF', r: 120, s: 256, f: 80, lbl: "ZENITH!" }
 ];
 
 let currentType, nextType, audioCtx;
 
-function initAudio() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-}
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
 function playNote(freq, type = 'sine', len = 0.2) {
     if (!audioCtx) return;
     const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
@@ -299,32 +217,18 @@ function playNote(freq, type = 'sine', len = 0.2) {
 let ground, leftW, rightW;
 
 function setup() {
-    const host = document.getElementById('p5-host');
     createCanvas(windowWidth, windowHeight);
-    const canv = document.querySelector('canvas');
-    if (host && canv && canv.parentElement !== host) {
-        host.appendChild(canv);
-    }
-    const cv = host ? host.querySelector('canvas') : document.querySelector('canvas');
-    if (cv) {
-        cv.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
-        cv.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
-    }
-    aimX = width / 2;
-
+    syncDeadLineY();
     if (!menuShown && !engine) {
-        engine = Engine.create(); 
+        engine = Engine.create();
         world = engine.world;
         applyLevelSettings();
-
         ground = Bodies.rectangle(width / 2, height - 10, width, 20, { isStatic: true });
         leftW = Bodies.rectangle(10, height / 2, 20, height, { isStatic: true });
         rightW = Bodies.rectangle(width - 10, height / 2, 20, height, { isStatic: true });
         World.add(world, [ground, leftW, rightW]);
-
         currentType = floor(random(3));
         nextType = floor(random(3));
-
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach(pair => {
                 if (pair.bodyA.label && pair.bodyB.label && pair.bodyA.label === pair.bodyB.label && pair.bodyA.label.includes('f_')) {
@@ -333,22 +237,18 @@ function setup() {
             });
         });
     }
-    p5Ready = true;
 }
 
 function initGame() {
-    engine = Engine.create(); 
+    engine = Engine.create();
     world = engine.world;
     applyLevelSettings();
-
     ground = Bodies.rectangle(width / 2, height - 10, width, 20, { isStatic: true });
     leftW = Bodies.rectangle(10, height / 2, 20, height, { isStatic: true });
     rightW = Bodies.rectangle(width - 10, height / 2, 20, height, { isStatic: true });
     World.add(world, [ground, leftW, rightW]);
-
     currentType = floor(random(3));
     nextType = floor(random(3));
-
     Events.on(engine, 'collisionStart', (event) => {
         event.pairs.forEach(pair => {
             if (pair.bodyA.label && pair.bodyB.label && pair.bodyA.label === pair.bodyB.label && pair.bodyA.label.includes('f_')) {
@@ -360,57 +260,73 @@ function initGame() {
 
 let lastTouchTime = 0;
 
-function syncAimFromInput() {
-    if (typeof touches !== 'undefined' && touches.length > 0) {
-        aimX = touches[0].x;
-    } else {
-        aimX = mouseX;
-    }
-    const r = COLORS[currentType] ? COLORS[currentType].r : 15;
-    aimX = constrain(aimX, r + 10, width - r - 10);
-}
-
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
+    syncDeadLineY();
     if (!engine) return;
-    
     Body.setPosition(ground, { x: width / 2, y: height - 10 });
     Body.setPosition(leftW, { x: 10, y: height / 2 });
     Body.setPosition(rightW, { x: width - 10, y: height / 2 });
     Body.setVertices(ground, [
-        { x: 0, y: height - 20 },
-        { x: width, y: height - 20 },
-        { x: width, y: height },
-        { x: 0, y: height }
+        { x: 0, y: height - 20 }, { x: width, y: height - 20 },
+        { x: width, y: height }, { x: 0, y: height }
     ]);
     Body.setVertices(leftW, [
-        { x: 0, y: 0 },
-        { x: 20, y: 0 },
-        { x: 20, y: height },
-        { x: 0, y: height }
+        { x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: height }, { x: 0, y: height }
     ]);
     Body.setVertices(rightW, [
-        { x: width - 20, y: 0 },
-        { x: width, y: 0 },
-        { x: width, y: height },
-        { x: width - 20, y: height }
+        { x: width - 20, y: 0 }, { x: width, y: 0 },
+        { x: width, y: height }, { x: width - 20, y: height }
     ]);
 }
 
+function isOverUltraBtn(px, py) {
+    return px >= ultraBtn.x && px <= ultraBtn.x + ultraBtn.w &&
+           py >= ultraBtn.y && py <= ultraBtn.y + ultraBtn.h;
+}
+
+/** Ультра: перемешивание — будим тела, резко задаём скорость (пробел / кнопка, только при 100%). */
+function tryUltra() {
+    if (menuShown || !engine || gameOver) return false;
+    if (ultraCharge < 100) return false;
+    initAudio();
+    playNote(55, 'sawtooth', 0.6);
+    shakeAmount = 48;
+    fruits.forEach(f => {
+        const b = f.body;
+        wakeBody(b);
+        const mag = random(22, 42);
+        const ang = random(TWO_PI);
+        Body.setVelocity(b, {
+            x: cos(ang) * mag + random(-10, 10),
+            y: sin(ang) * mag + random(-10, 10)
+        });
+        Body.setAngularVelocity(b, random(-0.65, 0.65));
+    });
+    ultraCharge = 0;
+    background(255, 100);
+    return true;
+}
+
 function touchStarted() {
-    if (menuShown || !engine) return false;
+    /* return true — не вызывать preventDefault, иначе на мобильных не сработает кнопка «Играть» в DOM */
+    if (menuShown || !engine) return true;
+    if (isOverUltraBtn(mouseX, mouseY)) {
+        tryUltra();
+        return false;
+    }
     lastTouchTime = millis();
-    syncAimFromInput();
     handleInput();
     return false;
 }
 
 function mousePressed() {
-    if (menuShown || !engine) return false;
-    if (millis() - lastTouchTime < 300) {
+    if (menuShown || !engine) return true;
+    if (isOverUltraBtn(mouseX, mouseY)) {
+        tryUltra();
         return false;
     }
-    syncAimFromInput();
+    if (millis() - lastTouchTime < 300) return false;
     handleInput();
 }
 
@@ -424,7 +340,6 @@ function handleInput() {
         document.getElementById('record-display').textContent = highScore;
         document.getElementById('menu').classList.remove('hidden');
         document.body.classList.add('menu-open');
-        document.body.classList.remove('playing');
         menuShown = true;
         gameOver = false;
         score = 0;
@@ -439,7 +354,7 @@ function handleInput() {
         return;
     }
     playNote(450, 'triangle', 0.04);
-    const b = Bodies.circle(aimX, 85, COLORS[currentType].r, {
+    const b = Bodies.circle(mouseX, spawnDropY(), COLORS[currentType].r, {
         label: 'f_' + currentType, restitution: 0.3, friction: 0.2
     });
     World.add(world, b);
@@ -455,53 +370,39 @@ function applyLevelSettings() {
 
 function draw() {
     if (menuShown || !engine) return;
-
-    syncAimFromInput();
-    const ultraEl = document.getElementById('ultra-btn');
-    if (ultraEl) {
-        ultraEl.classList.toggle('ultra-ready', ultraCharge >= 100 && !gameOver);
-    }
-
     if (gameOver) {
         background(0, 230); fill(255); textAlign(CENTER); textSize(45);
         text("GAME OVER", width/2, height/2); textSize(24);
         text("Score: " + score, width/2, height/2 + 50); return;
     }
-
+    syncDeadLineY();
     background(level === 1 ? 10 : 15);
     translate(random(-shakeAmount, shakeAmount), random(-shakeAmount, shakeAmount));
     shakeAmount = max(0, shakeAmount * 0.85);
-
     Engine.update(engine);
-
-    // Опасная линия
-    stroke(255, 0, 0, dangerTimer > 30 ? 255 : 60);
+    const lineAlpha = dangerTimer > 30 ? 255 : 80 + min(100, dangerTimer * 2);
+    strokeWeight(3);
+    stroke(255, 0, 0, lineAlpha);
     line(0, deadLineY, width, deadLineY);
-
+    strokeWeight(1);
     let inDanger = false;
     fruits.forEach(f => {
         push();
         translate(f.body.position.x, f.body.position.y);
         rotate(f.body.angle);
-        
-        // Четкая белая обводка для контраста
         stroke(255, 100);
         strokeWeight(2);
         fill(f.col);
         ellipse(0, 0, f.r * 2);
-        
-        // Блик
         noStroke();
         fill(255, 150);
         ellipse(-f.r * 0.3, -f.r * 0.3, f.r * 0.4);
         pop();
-        
-        if (f.body.position.y < deadLineY) inDanger = true;
+        // Опасность, когда верх шара выше красной линии (не только центр).
+        if (f.body.position.y - f.r < deadLineY) inDanger = true;
     });
-
     dangerTimer = inDanger ? dangerTimer + 1 : max(0, dangerTimer - 1);
     if (dangerTimer > 180) gameOver = true;
-
     updateParticles();
     updateTexts();
     drawUI();
@@ -511,39 +412,54 @@ function drawUI() {
     fill(255); textAlign(LEFT); textSize(20); textStyle(BOLD); noStroke();
     text("SCORE: " + score, 25, 40);
     text("LEVEL: " + level, 25, 70);
-    
-    fill(COLORS[currentType].c); ellipse(aimX, 85, COLORS[currentType].r * 2);
+    fill(COLORS[currentType].c); ellipse(mouseX, spawnDropY(), COLORS[currentType].r * 2);
     textAlign(RIGHT); fill(255, 180); textSize(14);
     text("NEXT:", width - 60, 40);
     fill(COLORS[nextType].c); ellipse(width - 35, 35, COLORS[nextType].r);
+
+    ultraBtn.w = min(160, width * 0.42);
+    ultraBtn.h = 40;
+    ultraBtn.x = 16;
+    ultraBtn.y = height - ultraBtn.h - 12;
+    const ready = ultraCharge >= 100;
+    push();
+    noFill();
+    strokeWeight(1.25);
+    const g = drawingContext;
+    g.globalAlpha = ready ? 0.28 : 0.22;
+    stroke(ready ? 0 : 150, ready ? 255 : 210, ready ? 210 : 230);
+    rect(ultraBtn.x, ultraBtn.y, ultraBtn.w, ultraBtn.h, 10);
+    g.globalAlpha = 1;
+    pop();
+    noStroke();
+    fill(ready ? 255 : 200, ready ? 130 : 100);
+    textAlign(CENTER, CENTER);
+    textSize(min(17, width * 0.042));
+    textStyle(BOLD);
+    text(LABEL_ULTRA + ' ' + floor(ultraCharge) + '%', ultraBtn.x + ultraBtn.w / 2, ultraBtn.y + ultraBtn.h / 2);
 }
 
 function merge(a, b) {
     const type = parseInt(a.label.split('_')[1]);
     const x = (a.position.x + b.position.x) / 2, y = (a.position.y + b.position.y) / 2;
-    
     fruits = fruits.filter(f => f.body !== a && f.body !== b);
     World.remove(world, [a, b]);
-
     if (type < COLORS.length - 1) {
         playNote(COLORS[type].f, 'sine', 0.25);
         const nextIdx = type + 1;
         const newB = Bodies.circle(x, y, COLORS[nextIdx].r, { label: 'f_' + nextIdx });
         World.add(world, newB);
         fruits.push({ body: newB, r: COLORS[nextIdx].r, col: COLORS[nextIdx].c });
-        
         score += COLORS[type].s;
         ultraCharge = min(100, ultraCharge + 10);
         shakeAmount = 4;
         floatingTexts.push(new FloatingText(x, y, COLORS[type].lbl));
-        for(let i=0; i<15; i++) particles.push(new Particle(x, y, COLORS[type].c));
+        for (let i = 0; i < 15; i++) particles.push(new Particle(x, y, COLORS[type].c));
     } else {
-        // ZENITH ВЗРЫВ И ПЕРЕХОД
         playNote(40, 'sawtooth', 0.8);
         score += 2000;
         level++;
         applyLevelSettings();
-        
         floatingTexts.push(new FloatingText(width/2, height/2, "LEVEL UP!"));
         shakeAmount = 40;
         fruits.forEach(f => World.remove(world, f.body));
@@ -552,20 +468,11 @@ function merge(a, b) {
     }
 }
 
-function tryUltra() {
-    if (menuShown || !engine || gameOver) return;
-    initAudio();
-    if (ultraCharge < 100) return;
-    playNote(55, 'sawtooth', 0.6);
-    shakeAmount = 25;
-    fruits.forEach(f => Body.applyForce(f.body, f.body.position, { x: random(-0.05, 0.05), y: -0.25 }));
-    ultraCharge = 0;
-    background(255, 100);
-}
-
 function keyPressed() {
     if (menuShown || !engine) return;
-    if (key === ' ') tryUltra();
+    if (key === ' ') {
+        tryUltra();
+    }
 }
 
 class Particle {
@@ -596,24 +503,6 @@ function updateTexts() {
         if (floatingTexts[i].l <= 0) floatingTexts.splice(i, 1);
     }
 }
-
-(function bindPlayButton() {
-    const btn = document.getElementById('play-btn');
-    if (!btn) return;
-    let last = 0;
-    function firePlay(e) {
-        if (e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-        const t = Date.now();
-        if (t - last < 400) return;
-        last = t;
-        startGame();
-    }
-    btn.addEventListener('click', firePlay);
-    btn.addEventListener('touchend', firePlay, { passive: false });
-})();
 </script>
 </body>
 </html>
