@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Neon Bloom: High Contrast Edition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: relative;
+            z-index: 1;
+        }
+        body.menu-open canvas {
+            pointer-events: none;
+        }
+        #menu {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1000;
+            padding: 30px 20px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        @media (min-height: 900px) {
+            #menu {
+                justify-content: center;
+            }
+        }
+        #menu.hidden {
+            display: none;
+        }
+        .menu-title {
+            font-size: 3.5rem;
+            font-weight: bold;
+            background: linear-gradient(90deg, #FFFF00, #00FF00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .menu-desc {
+            color: #ccc;
+            font-size: 1.1rem;
+            text-align: center;
+            margin-bottom: 30px;
+            max-width: 500px;
+            line-height: 1.5;
+        }
+        .play-btn {
+            background: #00DD88;
+            color: #000;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.3rem;
+            font-weight: bold;
+            border-radius: 20px;
+            cursor: pointer;
+            margin-bottom: 40px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .play-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px #00DD88;
+        }
+        .play-btn:active {
+            transform: scale(0.98);
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            width: 100%;
+            max-width: 900px;
+        }
+        .feature-card:nth-child(4) {
+            grid-column: auto;
+            max-width: none;
+            margin: 0;
+        }
+        @media (min-width: 1100px) {
+            .feature-card:nth-child(4) {
+                grid-column: 1 / -1;
+                max-width: 250px;
+                margin: 0 auto;
+            }
+        }
+        .feature-card {
+            border: 2px solid #444;
+            border-radius: 10px;
+            padding: 20px;
+            background: rgba(50, 50, 50, 0.5);
+        }
+        .feature-title {
+            color: #00FFFF;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+        }
+        .feature-title.yellow { color: #FFFF00; }
+        .feature-title.purple { color: #00FFFF; }
+        .feature-title.cyan { color: #FF00FF; }
+        .feature-desc {
+            color: #aaa;
+            font-size: 0.95rem;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body class="menu-open">
+<div id="menu">
+    <div class="menu-title">Neon Bloom</div>
+    <div class="menu-desc">Собирай одинаковые неоновые сферы. Создай Зенит и очисти пространство взрывом!</div>
+    <button class="play-btn" onclick="startGame()">🎮 Играть</button>
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-title yellow">⚡ УЛЬТА</div>
+            <div class="feature-desc">Нажми Пробел или тряхни телефон, чтобы переместить поле.</div>
+        </div>
+        <div class="feature-card">
+            <div class="feature-title cyan">💎 ЗЕНИТ</div>
+            <div class="feature-desc">Два белых шара при слиянии взрываются и дают бонус.</div>
+        </div>
+        <div class="feature-card">
+            <div class="feature-title">🏆 РЕКОРД</div>
+            <div class="feature-desc" id="record-display">0</div>
+        </div>
+        <div class="feature-card">
+            <div class="feature-title cyan">🚀 УРОВНИ</div>
+            <div class="feature-desc">Каждый Zenith Merge повышает уровень гравитации.</div>
+        </div>
+    </div>
+</div>
+<script>
+const { Engine, World, Bodies, Body, Events } = Matter;
+
+let engine, world, fruits = [], particles = [], floatingTexts = [];
+let score = 0, gameOver = false, ultraCharge = 100, dangerTimer = 0;
+let level = 1;
+let shakeAmount = 0;
+const deadLineY = 130;
+let menuShown = true;
+let highScore = localStorage.getItem('neonBloomHighScore') || 0;
+
+function startGame() {
+    document.getElementById('menu').classList.add('hidden');
+    document.body.classList.remove('menu-open');
+    menuShown = false;
+    if (!engine) {
+        initGame();
+    }
+}
+
+// Контрастная палитра: без полутонов
+const COLORS = [
+    { c: '#FF0000', r: 15, s: 2, f: 450, lbl: "RED!" },     // 0: Красный
+    { c: '#FFFF00', r: 25, s: 8, f: 350, lbl: "YELLOW!" },  // 1: Желтый
+    { c: '#00FF00', r: 40, s: 16, f: 260, lbl: "GREEN!" },  // 2: Зеленый
+    { c: '#00FFFF', r: 55, s: 32, f: 200, lbl: "CYAN!" },   // 3: Голубой
+    { c: '#0000FF', r: 75, s: 64, f: 140, lbl: "BLUE!" },   // 4: Синий
+    { c: '#FF00FF', r: 95, s: 128, f: 100, lbl: "PURPLE!" },// 5: Фиолетовый
+    { c: '#FFFFFF', r: 120, s: 256, f: 80, lbl: "ZENITH!" }// 6: Белый (Взрыв)
+];
+
+let currentType, nextType, audioCtx;
+
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+function playNote(freq, type = 'sine', len = 0.2) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    g.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + len);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + len);
+}
+
+let ground, leftW, rightW;
+
+function setup() {
+    createCanvas(windowWidth, windowHeight);
+    
+    if (!menuShown && !engine) {
+        engine = Engine.create(); 
+        world = engine.world;
+        applyLevelSettings();
+
+        ground = Bodies.rectangle(width / 2, height - 10, width, 20, { isStatic: true });
+        leftW = Bodies.rectangle(10, height / 2, 20, height, { isStatic: true });
+        rightW = Bodies.rectangle(width - 10, height / 2, 20, height, { isStatic: true });
+        World.add(world, [ground, leftW, rightW]);
+
+        currentType = floor(random(3));
+        nextType = floor(random(3));
+
+        Events.on(engine, 'collisionStart', (event) => {
+            event.pairs.forEach(pair => {
+                if (pair.bodyA.label && pair.bodyB.label && pair.bodyA.label === pair.bodyB.label && pair.bodyA.label.includes('f_')) {
+                    merge(pair.bodyA, pair.bodyB);
+                }
+            });
+        });
+    }
+}
+
+function initGame() {
+    engine = Engine.create(); 
+    world = engine.world;
+    applyLevelSettings();
+
+    ground = Bodies.rectangle(width / 2, height - 10, width, 20, { isStatic: true });
+    leftW = Bodies.rectangle(10, height / 2, 20, height, { isStatic: true });
+    rightW = Bodies.rectangle(width - 10, height / 2, 20, height, { isStatic: true });
+    World.add(world, [ground, leftW, rightW]);
+
+    currentType = floor(random(3));
+    nextType = floor(random(3));
+
+    Events.on(engine, 'collisionStart', (event) => {
+        event.pairs.forEach(pair => {
+            if (pair.bodyA.label && pair.bodyB.label && pair.bodyA.label === pair.bodyB.label && pair.bodyA.label.includes('f_')) {
+                merge(pair.bodyA, pair.bodyB);
+            }
+        });
+    });
+}
+
+let lastTouchTime = 0;
+
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+    if (!engine) return;
+    
+    Body.setPosition(ground, { x: width / 2, y: height - 10 });
+    Body.setPosition(leftW, { x: 10, y: height / 2 });
+    Body.setPosition(rightW, { x: width - 10, y: height / 2 });
+    Body.setVertices(ground, [
+        { x: 0, y: height - 20 },
+        { x: width, y: height - 20 },
+        { x: width, y: height },
+        { x: 0, y: height }
+    ]);
+    Body.setVertices(leftW, [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: height },
+        { x: 0, y: height }
+    ]);
+    Body.setVertices(rightW, [
+        { x: width - 20, y: 0 },
+        { x: width, y: 0 },
+        { x: width, y: height },
+        { x: width - 20, y: height }
+    ]);
+}
+
+function touchStarted() {
+    if (menuShown || !engine) return false;
+    lastTouchTime = millis();
+    handleInput();
+    return false;
+}
+
+function mousePressed() {
+    if (menuShown || !engine) return false;
+    if (millis() - lastTouchTime < 300) {
+        return false;
+    }
+    handleInput();
+}
+
+function handleInput() {
+    initAudio();
+    if (gameOver) {
+        if (score > highScore) {
+            highScore = score;
+            localStorage.setItem('neonBloomHighScore', highScore);
+        }
+        document.getElementById('record-display').textContent = highScore;
+        document.getElementById('menu').classList.remove('hidden');
+        document.body.classList.add('menu-open');
+        menuShown = true;
+        gameOver = false;
+        score = 0;
+        level = 1;
+        ultraCharge = 100;
+        dangerTimer = 0;
+        fruits = [];
+        particles = [];
+        floatingTexts = [];
+        if (engine) World.clear(world);
+        engine = null;
+        return;
+    }
+    playNote(450, 'triangle', 0.04);
+    const b = Bodies.circle(mouseX, 85, COLORS[currentType].r, {
+        label: 'f_' + currentType, restitution: 0.3, friction: 0.2
+    });
+    World.add(world, b);
+    fruits.push({ body: b, r: COLORS[currentType].r, col: COLORS[currentType].c });
+    currentType = nextType;
+    nextType = floor(random(3));
+}
+
+function applyLevelSettings() {
+    if (!engine) return;
+    engine.gravity.y = level === 1 ? 1.4 : 1.1;
+}
+
+function draw() {
+    if (menuShown || !engine) return;
+    
+    if (gameOver) {
+        background(0, 230); fill(255); textAlign(CENTER); textSize(45);
+        text("GAME OVER", width/2, height/2); textSize(24);
+        text("Score: " + score, width/2, height/2 + 50); return;
+    }
+
+    background(level === 1 ? 10 : 15);
+    translate(random(-shakeAmount, shakeAmount), random(-shakeAmount, shakeAmount));
+    shakeAmount = max(0, shakeAmount * 0.85);
+
+    Engine.update(engine);
+
+    // Опасная линия
+    stroke(255, 0, 0, dangerTimer > 30 ? 255 : 60);
+    line(0, deadLineY, width, deadLineY);
+
+    let inDanger = false;
+    fruits.forEach(f => {
+        push();
+        translate(f.body.position.x, f.body.position.y);
+        rotate(f.body.angle);
+        
+        // Четкая белая обводка для контраста
+        stroke(255, 100);
+        strokeWeight(2);
+        fill(f.col);
+        ellipse(0, 0, f.r * 2);
+        
+        // Блик
+        noStroke();
+        fill(255, 150);
+        ellipse(-f.r * 0.3, -f.r * 0.3, f.r * 0.4);
+        pop();
+        
+        if (f.body.position.y < deadLineY) inDanger = true;
+    });
+
+    dangerTimer = inDanger ? dangerTimer + 1 : max(0, dangerTimer - 1);
+    if (dangerTimer > 180) gameOver = true;
+
+    updateParticles();
+    updateTexts();
+    drawUI();
+}
+
+function drawUI() {
+    fill(255); textAlign(LEFT); textSize(20); textStyle(BOLD); noStroke();
+    text("SCORE: " + score, 25, 40);
+    text("LEVEL: " + level, 25, 70);
+    
+    fill(COLORS[currentType].c); ellipse(mouseX, 85, COLORS[currentType].r * 2);
+    textAlign(RIGHT); fill(255, 180); textSize(14);
+    text("NEXT:", width - 60, 40);
+    fill(COLORS[nextType].c); ellipse(width - 35, 35, COLORS[nextType].r);
+}
+
+function merge(a, b) {
+    const type = parseInt(a.label.split('_')[1]);
+    const x = (a.position.x + b.position.x) / 2, y = (a.position.y + b.position.y) / 2;
+    
+    fruits = fruits.filter(f => f.body !== a && f.body !== b);
+    World.remove(world, [a, b]);
+
+    if (type < COLORS.length - 1) {
+        playNote(COLORS[type].f, 'sine', 0.25);
+        const nextIdx = type + 1;
+        const newB = Bodies.circle(x, y, COLORS[nextIdx].r, { label: 'f_' + nextIdx });
+        World.add(world, newB);
+        fruits.push({ body: newB, r: COLORS[nextIdx].r, col: COLORS[nextIdx].c });
+        
+        score += COLORS[type].s;
+        ultraCharge = min(100, ultraCharge + 10);
+        shakeAmount = 4;
+        floatingTexts.push(new FloatingText(x, y, COLORS[type].lbl));
+        for(let i=0; i<15; i++) particles.push(new Particle(x, y, COLORS[type].c));
+    } else {
+        // ZENITH ВЗРЫВ И ПЕРЕХОД
+        playNote(40, 'sawtooth', 0.8);
+        score += 2000;
+        level++;
+        applyLevelSettings();
+        
+        floatingTexts.push(new FloatingText(width/2, height/2, "LEVEL UP!"));
+        shakeAmount = 40;
+        fruits.forEach(f => World.remove(world, f.body));
+        fruits = [];
+        background(255);
+    }
+}
+
+function keyPressed() {
+    if (menuShown || !engine) return;
+    if (key === ' ' && ultraCharge >= 100) {
+        playNote(55, 'sawtooth', 0.6);
+        shakeAmount = 25;
+        fruits.forEach(f => Body.applyForce(f.body, f.body.position, { x: random(-0.05, 0.05), y: -0.25 }));
+        ultraCharge = 0; background(255, 100);
+    }
+}
+
+class Particle {
+    constructor(x, y, c) {
+        this.p = createVector(x, y); this.v = p5.Vector.random2D().mult(random(2, 10));
+        this.l = 255; this.c = c;
+    }
+    update() { this.p.add(this.v); this.l -= 6; }
+    draw() { fill(this.c); noStroke(); ellipse(this.p.x, this.p.y, random(3, 6)); }
+}
+
+class FloatingText {
+    constructor(x, y, t) { this.p = createVector(x, y); this.t = t; this.l = 255; }
+    update() { this.p.y -= 2; this.l -= 4; }
+    draw() { fill(255, this.l); textAlign(CENTER); textSize(40); textStyle(BOLD); text(this.t, this.p.x, this.p.y); }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update(); particles[i].draw();
+        if (particles[i].l <= 0) particles.splice(i, 1);
+    }
+}
+
+function updateTexts() {
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        floatingTexts[i].update(); floatingTexts[i].draw();
+        if (floatingTexts[i].l <= 0) floatingTexts.splice(i, 1);
+    }
+}
+</script>
+</body>
+</html>
