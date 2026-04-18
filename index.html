@@ -165,7 +165,9 @@ function wakeBody(body) {
 const LABEL_ULTRA = '\u0423\u041b\u042c\u0422\u0420\u0410';
 
 let engine, world, fruits = [], particles = [], floatingTexts = [];
-let score = 0, gameOver = false, ultraCharge = 100, dangerTimer = 0;
+let score = 0, gameOver = false, ultraCharge = 100;
+/** Нарастает, пока шары «переполняют стакан» у красной линии; ульта может сбросить ситуацию. */
+let dangerTimer = 0;
 let level = 1;
 let shakeAmount = 0;
 /** Красная линия у верхнего края (y меньше = выше по экрану). Обновляется при resize. */
@@ -240,6 +242,7 @@ function setup() {
 }
 
 function initGame() {
+    dangerTimer = 0;
     engine = Engine.create();
     world = engine.world;
     applyLevelSettings();
@@ -285,23 +288,23 @@ function isOverUltraBtn(px, py) {
            py >= ultraBtn.y && py <= ultraBtn.y + ultraBtn.h;
 }
 
-/** Ультра: перемешивание — будим тела, резко задаём скорость (пробел / кнопка, только при 100%). */
+/** Ультра: шары разлетаются в случайные стороны, игра продолжается (пробел / кнопка, только при 100%). */
 function tryUltra() {
     if (menuShown || !engine || gameOver) return false;
     if (ultraCharge < 100) return false;
     initAudio();
     playNote(55, 'sawtooth', 0.6);
-    shakeAmount = 48;
+    shakeAmount = 52;
     fruits.forEach(f => {
         const b = f.body;
         wakeBody(b);
-        const mag = random(22, 42);
+        const mag = random(26, 52);
         const ang = random(TWO_PI);
         Body.setVelocity(b, {
-            x: cos(ang) * mag + random(-10, 10),
-            y: sin(ang) * mag + random(-10, 10)
+            x: cos(ang) * mag + random(-16, 16),
+            y: sin(ang) * mag + random(-16, 16)
         });
-        Body.setAngularVelocity(b, random(-0.65, 0.65));
+        Body.setAngularVelocity(b, random(-0.75, 0.75));
     });
     ultraCharge = 0;
     background(255, 100);
@@ -424,15 +427,15 @@ function drawUI() {
     const ready = ultraCharge >= 100;
     push();
     noFill();
-    strokeWeight(1.25);
+    strokeWeight(1.75);
     const g = drawingContext;
-    g.globalAlpha = ready ? 0.28 : 0.22;
-    stroke(ready ? 0 : 150, ready ? 255 : 210, ready ? 210 : 230);
+    g.globalAlpha = ready ? 0.58 : 0.48;
+    stroke(ready ? 40 : 180, ready ? 255 : 230, ready ? 230 : 250);
     rect(ultraBtn.x, ultraBtn.y, ultraBtn.w, ultraBtn.h, 10);
     g.globalAlpha = 1;
     pop();
     noStroke();
-    fill(ready ? 255 : 200, ready ? 130 : 100);
+    fill(ready ? 255 : 220, ready ? 200 : 165);
     textAlign(CENTER, CENTER);
     textSize(min(17, width * 0.042));
     textStyle(BOLD);
