@@ -143,7 +143,7 @@
 <body class="menu-open">
 <div id="menu">
     <div class="menu-title">Neon Bloom</div>
-    <div class="menu-desc">Шары сами катятся сверху — перетаскивай их, чтобы не заполнили экран. Соединяй одинаковые, создай Зенит! С уровнем всё быстрее.</div>
+    <div class="menu-desc">Сверху падают по два шара — сами по себе они не сливаются. Тащи любой шар на такой же цвет с любой стороны — тогда будет слияние. Создай Зенит!</div>
     <button type="button" class="play-btn" id="btn-play">🎮 Играть</button>
     <div class="features-grid">
         <div class="feature-card">
@@ -194,7 +194,32 @@ let ultraBtn = { x: 0, y: 0, w: 140, h: 40 };
 
 /** Перетаскивание шара мышью / пальцем. */
 let dragBody = null;
+/** После отпуска — короткое окно, чтобы слияние сработало при «положил и отпустил». */
+let lastPlacedBody = null;
+let lastPlacedAt = 0;
+const DRAG_MERGE_GRACE_MS = 450;
 let lastAutoSpawnMs = 0;
+
+function fruitForBody(body) {
+    return fruits.find(f => f.body === body);
+}
+
+/** Слияние только если игрок везёт шар в другой или только что отпустил его (не при свободном падении). */
+function mergeAllowedByPlayer(a, b) {
+    if (a === dragBody || b === dragBody) return true;
+    if (!lastPlacedBody) return false;
+    if (millis() - lastPlacedAt > DRAG_MERGE_GRACE_MS) return false;
+    return a === lastPlacedBody || b === lastPlacedBody;
+}
+
+function onCollisionMerge(event) {
+    event.pairs.forEach(pair => {
+        const A = pair.bodyA, B = pair.bodyB;
+        if (!A.label || !B.label || A.label !== B.label || !A.label.includes('f_')) return;
+        if (!mergeAllowedByPlayer(A, B)) return;
+        merge(A, B);
+    });
+}
 
 function startGame(e) {
     if (e) {
@@ -258,19 +283,15 @@ function setup() {
         World.add(world, [ground, leftW, rightW]);
         currentType = floor(random(3));
         nextType = floor(random(3));
-        Events.on(engine, 'collisionStart', (event) => {
-            event.pairs.forEach(pair => {
-                if (pair.bodyA.label && pair.bodyB.label && pair.bodyA.label === pair.bodyB.label && pair.bodyA.label.includes('f_')) {
-                    merge(pair.bodyA, pair.bodyB);
-                }
-            });
-        });
+        Events.on(engine, 'collisionStart', onCollisionMerge);
     }
 }
 
 function initGame() {
     dangerTimer = 0;
     dragBody = null;
+    lastPlacedBody = null;
+    lastPlacedAt = 0;
     lastAutoSpawnMs = millis();
     engine = Engine.create();
     world = engine.world;
@@ -281,13 +302,7 @@ function initGame() {
     World.add(world, [ground, leftW, rightW]);
     currentType = floor(random(3));
     nextType = floor(random(3));
-    Events.on(engine, 'collisionStart', (event) => {
-        event.pairs.forEach(pair => {
-            if (pair.bodyA.label && pair.bodyB.label && pair.bodyA.label === pair.bodyB.label && pair.bodyA.label.includes('f_')) {
-                merge(pair.bodyA, pair.bodyB);
-            }
-        });
-    });
+    Events.on(engine, 'collisionStart', onCollisionMerge);
 }
 
 let lastTouchTime = 0;
@@ -327,12 +342,34 @@ function pointerXY() {
 function bodyUnderPointer(px, py) {
     if (!fruits.length) return null;
     const hit = Query.point(fruits.map(f => f.body), { x: px, y: py });
-    return hit.length ? hit[0] : null;
+    if (!hit.length) return null;
+    if (hit.length === 1) return hit[0];
+    hit.sort((u, v) => u.position.y - v.position.y);
+    return hit[0];
+}
+
+/** Пока шар падает/скользит — можно тащить; после успокоения — locked. */
+function updateFruitLocks() {
+    const settleNeed = 22;
+    const vMax = 0.52;
+    fruits.forEach(f => {
+        if (f.locked || dragBody === f.body) return;
+        const b = f.body;
+        const sp = Math.hypot(b.velocity.x, b.velocity.y);
+        if (sp < vMax) {
+            f._settleFr = (f._settleFr || 0) + 1;
+            if (f._settleFr >= settleNeed) f.locked = true;
+        } else {
+            f._settleFr = 0;
+        }
+    });
 }
 
 function tryStartDrag(px, py) {
     const b = bodyUnderPointer(px, py);
     if (!b) return false;
+    const f = fruitForBody(b);
+    if (f) f.locked = false;
     dragBody = b;
     wakeBody(b);
     return true;
@@ -398,13 +435,6 @@ function getAutoSpawnMs() {
     return max(360, 2800 - (level - 1) * 240);
 }
 
-/** Сколько шаров падает за один тик: ур.1 — 2, ур.2–3 — 3, с 4-го — 4. */
-function getBallsPerDrop() {
-    if (level >= 4) return 4;
-    if (level >= 2) return 3;
-    return 2;
-}
-
 function takeNextSpawnType() {
     const t = currentType;
     currentType = nextType;
@@ -412,10 +442,10 @@ function takeNextSpawnType() {
     return t;
 }
 
-/** Волна шаров с «верхней дорожки» — позиции разнесены по ширине. */
+/** Два шара с «верхней дорожки» — позиции разнесены по ширине. */
 function spawnAutoBall() {
     if (!engine || menuShown || gameOver) return;
-    const n = getBallsPerDrop();
+    const n = 2;
     for (let i = 0; i < n; i++) {
         const t = takeNextSpawnType();
         const R = COLORS[t].r;
@@ -435,7 +465,7 @@ function spawnAutoBall() {
         });
         Body.setAngularVelocity(b, random(-0.15, 0.15));
         World.add(world, b);
-        fruits.push({ body: b, r: R, col: COLORS[t].c });
+        fruits.push({ body: b, r: R, col: COLORS[t].c, locked: false });
     }
 }
 
@@ -501,6 +531,10 @@ function mouseDragged() {
 }
 
 function mouseReleased() {
+    if (dragBody) {
+        lastPlacedBody = dragBody;
+        lastPlacedAt = millis();
+    }
     dragBody = null;
 }
 
@@ -512,6 +546,10 @@ function touchMoved() {
 }
 
 function touchEnded() {
+    if (dragBody) {
+        lastPlacedBody = dragBody;
+        lastPlacedAt = millis();
+    }
     dragBody = null;
     return false;
 }
@@ -533,6 +571,8 @@ function handleInput() {
         ultraCharge = 100;
         dangerTimer = 0;
         dragBody = null;
+        lastPlacedBody = null;
+        lastPlacedAt = 0;
         fruits = [];
         particles = [];
         floatingTexts = [];
@@ -560,6 +600,7 @@ function draw() {
     shakeAmount = max(0, shakeAmount * 0.85);
     Engine.update(engine);
     keepFruitsOnScreen();
+    updateFruitLocks();
     if (millis() - lastAutoSpawnMs >= getAutoSpawnMs()) {
         lastAutoSpawnMs = millis();
         spawnAutoBall();
@@ -597,7 +638,7 @@ function drawUI() {
     text("SCORE: " + score, 25, 40);
     text("LEVEL: " + level, 25, 70);
     textSize(13); textStyle(NORMAL); fill(255, 160);
-    text("Тяни шары · сверху идут новые", 25, 96);
+    text("Слияние: тащи шар на такой же цвет (с любой стороны)", 25, 96);
     textSize(20); textStyle(BOLD);
     fill(255, 200); textAlign(RIGHT); textSize(13);
     text("СКОРО:", width - 88, 38);
@@ -630,6 +671,7 @@ function drawUI() {
 
 function merge(a, b) {
     if (dragBody === a || dragBody === b) dragBody = null;
+    if (lastPlacedBody === a || lastPlacedBody === b) lastPlacedBody = null;
     const type = parseInt(a.label.split('_')[1]);
     const x = (a.position.x + b.position.x) / 2, y = (a.position.y + b.position.y) / 2;
     fruits = fruits.filter(f => f.body !== a && f.body !== b);
@@ -639,7 +681,7 @@ function merge(a, b) {
         const nextIdx = type + 1;
         const newB = Bodies.circle(x, y, COLORS[nextIdx].r, { label: 'f_' + nextIdx });
         World.add(world, newB);
-        fruits.push({ body: newB, r: COLORS[nextIdx].r, col: COLORS[nextIdx].c });
+        fruits.push({ body: newB, r: COLORS[nextIdx].r, col: COLORS[nextIdx].c, locked: false });
         score += COLORS[type].s;
         ultraCharge = min(100, ultraCharge + 10);
         shakeAmount = 4;
@@ -656,6 +698,7 @@ function merge(a, b) {
         fruits.forEach(f => World.remove(world, f.body));
         fruits = [];
         dragBody = null;
+        lastPlacedBody = null;
         background(255);
     }
 }
