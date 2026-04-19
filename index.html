@@ -143,7 +143,7 @@
 <body class="menu-open">
 <div id="menu">
     <div class="menu-title">Neon Bloom</div>
-    <div class="menu-desc">Сверху падают по два шара — сами по себе они не сливаются. Тащи любой шар на такой же цвет с любой стороны — тогда будет слияние. Создай Зенит!</div>
+    <div class="menu-desc">Сверху за раз сыпется по шесть шаров — сами по себе они не сливаются. Тащи любой шар на такой же цвет с любой стороны — тогда будет слияние. Создай Зенит!</div>
     <button type="button" class="play-btn" id="btn-play">🎮 Играть</button>
     <div class="features-grid">
         <div class="feature-card">
@@ -165,7 +165,7 @@
     </div>
 </div>
 <script>
-const { Engine, World, Bodies, Body, Events, Query } = Matter;
+const { Engine, World, Bodies, Body, Query } = Matter;
 
 function wakeBody(body) {
     body.sleeping = false;
@@ -197,28 +197,44 @@ let dragBody = null;
 /** После отпуска — короткое окно, чтобы слияние сработало при «положил и отпустил». */
 let lastPlacedBody = null;
 let lastPlacedAt = 0;
-const DRAG_MERGE_GRACE_MS = 450;
+const DRAG_MERGE_GRACE_MS = 800;
+/** Запас к касанию: при teleport drag движок часто не даёт collisionStart — считаем сами. */
+const MERGE_TOUCH_PAD = 10;
 let lastAutoSpawnMs = 0;
 
 function fruitForBody(body) {
     return fruits.find(f => f.body === body);
 }
 
-/** Слияние только если игрок везёт шар в другой или только что отпустил его (не при свободном падении). */
-function mergeAllowedByPlayer(a, b) {
-    if (a === dragBody || b === dragBody) return true;
-    if (!lastPlacedBody) return false;
-    if (millis() - lastPlacedAt > DRAG_MERGE_GRACE_MS) return false;
-    return a === lastPlacedBody || b === lastPlacedBody;
-}
-
-function onCollisionMerge(event) {
-    event.pairs.forEach(pair => {
-        const A = pair.bodyA, B = pair.bodyB;
-        if (!A.label || !B.label || A.label !== B.label || !A.label.includes('f_')) return;
-        if (!mergeAllowedByPlayer(A, B)) return;
-        merge(A, B);
-    });
+/**
+ * Слияние по перекрытию, только если один из шаров — перетаскиваемый или только что отпущенный.
+ * Не полагаемся на collisionStart: при setPosition каждый кадр столкновения часто не регистрируются.
+ */
+function tryMergePlayerOverlap() {
+    if (!engine || gameOver || menuShown || fruits.length < 2) return;
+    const primaries = [];
+    if (dragBody) primaries.push(dragBody);
+    if (lastPlacedBody && millis() - lastPlacedAt <= DRAG_MERGE_GRACE_MS &&
+        lastPlacedBody !== dragBody)
+        primaries.push(lastPlacedBody);
+    for (let i = 0; i < primaries.length; i++) {
+        const primary = primaries[i];
+        if (!primary || !primary.label || !primary.label.includes('f_')) continue;
+        if (!fruits.some(f => f.body === primary)) continue;
+        const fPri = fruitForBody(primary);
+        if (!fPri) continue;
+        const lab = primary.label;
+        for (let j = 0; j < fruits.length; j++) {
+            const f = fruits[j];
+            const b = f.body;
+            if (b === primary || b.label !== lab) continue;
+            const dist = Math.hypot(b.position.x - primary.position.x, b.position.y - primary.position.y);
+            if (dist < fPri.r + f.r + MERGE_TOUCH_PAD) {
+                merge(primary, b);
+                return;
+            }
+        }
+    }
 }
 
 function startGame(e) {
@@ -283,7 +299,6 @@ function setup() {
         World.add(world, [ground, leftW, rightW]);
         currentType = floor(random(3));
         nextType = floor(random(3));
-        Events.on(engine, 'collisionStart', onCollisionMerge);
     }
 }
 
@@ -302,7 +317,6 @@ function initGame() {
     World.add(world, [ground, leftW, rightW]);
     currentType = floor(random(3));
     nextType = floor(random(3));
-    Events.on(engine, 'collisionStart', onCollisionMerge);
 }
 
 let lastTouchTime = 0;
@@ -370,6 +384,8 @@ function tryStartDrag(px, py) {
     if (!b) return false;
     const f = fruitForBody(b);
     if (f) f.locked = false;
+    lastPlacedBody = null;
+    lastPlacedAt = 0;
     dragBody = b;
     wakeBody(b);
     return true;
@@ -394,6 +410,7 @@ function moveDragTo(px, py) {
     Body.setPosition(dragBody, { x: cx, y: cy });
     Body.setVelocity(dragBody, { x: 0, y: 0 });
     Body.setAngularVelocity(dragBody, 0);
+    tryMergePlayerOverlap();
 }
 
 /** Не даём шарам вылетать за экран и режем слишком большую скорость. */
@@ -430,9 +447,9 @@ function keepFruitsOnScreen() {
     });
 }
 
-/** Интервал автоспавна (мс): с уровнем реже «передышка». */
+/** Интервал автоспавна (мс): плавный рост частоты, без резкого «шторма» со 2-го уровня. */
 function getAutoSpawnMs() {
-    return max(360, 2800 - (level - 1) * 240);
+    return max(1000, 2800 - (level - 1) * 90);
 }
 
 function takeNextSpawnType() {
@@ -442,26 +459,26 @@ function takeNextSpawnType() {
     return t;
 }
 
-/** Два шара с «верхней дорожки» — позиции разнесены по ширине. */
+/** Шесть шаров с «верхней дорожки» — позиции равномерно по ширине. */
 function spawnAutoBall() {
     if (!engine || menuShown || gameOver) return;
-    const n = 2;
+    const n = 6;
     for (let i = 0; i < n; i++) {
         const t = takeNextSpawnType();
         const R = COLORS[t].r;
         const margin = 28 + R;
         const frac = (i + 0.5) / n;
-        let x = margin + (width - 2 * margin) * frac + random(-24, 24);
+        let x = margin + (width - 2 * margin) * frac + random(-8, 8);
         x = constrain(x, margin, width - margin);
-        const y = max(38, deadLineY - 72 - R);
-        const runBoost = 1.15 + (level - 1) * 0.55;
+        const y = max(38, deadLineY - 72 - R) + random(-3, 3);
+        const runBoost = min(2, 1.12 + (level - 1) * 0.22);
         const dir = random() < 0.5 ? -1 : 1;
         const b = Bodies.circle(x, y, R, {
             label: 'f_' + t, restitution: 0.32, friction: 0.22, frictionAir: 0.01
         });
         Body.setVelocity(b, {
-            x: dir * runBoost * random(0.75, 1.35),
-            y: 1.35 + (level - 1) * 0.28 + random(0.25, 1.15)
+            x: dir * runBoost * random(0.72, 1.12),
+            y: 1.28 + (level - 1) * 0.12 + random(0.2, 0.95)
         });
         Body.setAngularVelocity(b, random(-0.15, 0.15));
         World.add(world, b);
@@ -584,7 +601,8 @@ function handleInput() {
 
 function applyLevelSettings() {
     if (!engine) return;
-    engine.gravity.y = 1.12 + level * 0.26;
+    /* База как раньше на 1-м уровне (1.38), дальше — мягче, без рывка на 2-м. */
+    engine.gravity.y = 1.12 + 0.26 + (level - 1) * 0.11;
 }
 
 function draw() {
@@ -599,6 +617,7 @@ function draw() {
     translate(random(-shakeAmount, shakeAmount), random(-shakeAmount, shakeAmount));
     shakeAmount = max(0, shakeAmount * 0.85);
     Engine.update(engine);
+    tryMergePlayerOverlap();
     keepFruitsOnScreen();
     updateFruitLocks();
     if (millis() - lastAutoSpawnMs >= getAutoSpawnMs()) {
@@ -670,6 +689,8 @@ function drawUI() {
 }
 
 function merge(a, b) {
+    if (!a || !b) return;
+    if (!fruits.some(f => f.body === a) || !fruits.some(f => f.body === b)) return;
     if (dragBody === a || dragBody === b) dragBody = null;
     if (lastPlacedBody === a || lastPlacedBody === b) lastPlacedBody = null;
     const type = parseInt(a.label.split('_')[1]);
